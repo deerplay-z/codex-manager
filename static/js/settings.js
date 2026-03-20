@@ -66,6 +66,13 @@ const elements = {
     tmServiceForm: document.getElementById('tm-service-form'),
     tmServiceModalTitle: document.getElementById('tm-service-modal-title'),
     testTmServiceBtn: document.getElementById('test-tm-service-btn'),
+    addNewapiServiceBtn: document.getElementById('add-newapi-service-btn'),
+    newapiServicesTable: document.getElementById('newapi-services-table'),
+    newapiServiceEditModal: document.getElementById('newapi-service-edit-modal'),
+    closeNewapiServiceModal: document.getElementById('close-newapi-service-modal'),
+    cancelNewapiServiceBtn: document.getElementById('cancel-newapi-service-btn'),
+    newapiServiceForm: document.getElementById('newapi-service-form'),
+    newapiServiceModalTitle: document.getElementById('newapi-service-modal-title'),
     // 验证码设置
     emailCodeForm: document.getElementById('email-code-form'),
     // Outlook 设置
@@ -87,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCpaServices();
     loadSub2ApiServices();
     loadTmServices();
+    loadNewapiServices();
     initEventListeners();
 });
 
@@ -269,6 +277,23 @@ function initEventListeners() {
         elements.testTmServiceBtn.addEventListener('click', handleTestTmService);
     }
 
+    if (elements.addNewapiServiceBtn) {
+        elements.addNewapiServiceBtn.addEventListener('click', () => openNewapiServiceModal());
+    }
+    if (elements.closeNewapiServiceModal) {
+        elements.closeNewapiServiceModal.addEventListener('click', closeNewapiServiceModal);
+    }
+    if (elements.cancelNewapiServiceBtn) {
+        elements.cancelNewapiServiceBtn.addEventListener('click', closeNewapiServiceModal);
+    }
+    if (elements.newapiServiceEditModal) {
+        elements.newapiServiceEditModal.addEventListener('click', (e) => {
+            if (e.target === elements.newapiServiceEditModal) closeNewapiServiceModal();
+        });
+    }
+    if (elements.newapiServiceForm) {
+        elements.newapiServiceForm.addEventListener('submit', handleSaveNewapiService);
+    }
     // CPA 服务管理
     if (elements.addCpaServiceBtn) {
         elements.addCpaServiceBtn.addEventListener('click', () => openCpaServiceModal());
@@ -1214,6 +1239,114 @@ async function handleTestTmService() {
         elements.testTmServiceBtn.textContent = '🔌 测试连接';
     }
 }
+
+async function loadNewapiServices() {
+    if (!elements.newapiServicesTable) return;
+    try {
+        const services = await api.get('/newapi-services');
+        renderNewapiServicesTable(services);
+    } catch (e) {
+        elements.newapiServicesTable.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
+    }
+}
+
+function renderNewapiServicesTable(services) {
+    if (!services || services.length === 0) {
+        elements.newapiServicesTable.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 NEWAPI 服务，点击「添加服务」新增</td></tr>';
+        return;
+    }
+    elements.newapiServicesTable.innerHTML = services.map(s => `
+        <tr>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
+            <td style="text-align:center;">${s.priority}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="editNewapiService(${s.id})">编辑</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteNewapiService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function openNewapiServiceModal(service = null) {
+    document.getElementById('newapi-service-id').value = service ? service.id : '';
+    document.getElementById('newapi-service-name').value = service ? service.name : '';
+    document.getElementById('newapi-service-url').value = service ? service.api_url : '';
+    document.getElementById('newapi-service-key').value = '';
+    document.getElementById('newapi-service-priority').value = service ? service.priority : 0;
+    document.getElementById('newapi-service-enabled').checked = service ? service.enabled : true;
+    if (service) {
+        document.getElementById('newapi-service-key').placeholder = service.has_key ? '已配置，留空保持不变' : '请输入 Root Token / API Key';
+    } else {
+        document.getElementById('newapi-service-key').placeholder = '请输入 Root Token / API Key';
+    }
+    elements.newapiServiceModalTitle.textContent = service ? '编辑 NEWAPI 服务' : '添加 NEWAPI 服务';
+    elements.newapiServiceEditModal.classList.add('active');
+}
+
+function closeNewapiServiceModal() {
+    elements.newapiServiceEditModal.classList.remove('active');
+}
+
+async function editNewapiService(id) {
+    try {
+        const service = await api.get(`/newapi-services/${id}`);
+        openNewapiServiceModal(service);
+    } catch (e) {
+        toast.error('获取服务信息失败: ' + e.message);
+    }
+}
+
+async function handleSaveNewapiService(e) {
+    e.preventDefault();
+    const id = document.getElementById('newapi-service-id').value;
+    const name = document.getElementById('newapi-service-name').value.trim();
+    const apiUrl = document.getElementById('newapi-service-url').value.trim();
+    const apiKey = document.getElementById('newapi-service-key').value.trim();
+    const priority = parseInt(document.getElementById('newapi-service-priority').value) || 0;
+    const enabled = document.getElementById('newapi-service-enabled').checked;
+
+    if (!name || !apiUrl) {
+        toast.error('名称和 API URL 不能为空');
+        return;
+    }
+    if (!id && !apiKey) {
+        toast.error('新增服务时 Root Token / API Key 不能为空');
+        return;
+    }
+
+    try {
+        const payload = { name, api_url: apiUrl, priority, enabled };
+        if (apiKey) payload.api_key = apiKey;
+
+        if (id) {
+            await api.patch(`/newapi-services/${id}`, payload);
+            toast.success('服务已更新');
+        } else {
+            payload.api_key = apiKey;
+            await api.post('/newapi-services', payload);
+            toast.success('服务已添加');
+        }
+        closeNewapiServiceModal();
+        loadNewapiServices();
+    } catch (e) {
+        toast.error('保存失败: ' + e.message);
+    }
+}
+
+async function deleteNewapiService(id, name) {
+    const confirmed = await confirm(`确定要删除 NEWAPI 服务「${name}」吗？`);
+    if (!confirmed) return;
+    try {
+        await api.delete(`/newapi-services/${id}`);
+        toast.success('已删除');
+        loadNewapiServices();
+    } catch (e) {
+        toast.error('删除失败: ' + e.message);
+    }
+}
+
 
 
 // ============== CPA 服务管理 ==============
